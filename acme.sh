@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================
-# Cloudflare 自动 DNS 证书管理脚本
+# Cloudflare 自动 DNS 证书管理脚本（含自动续签）
 # ==========================
 
 ACME_HOME="$HOME/.acme.sh"
@@ -113,10 +113,43 @@ install_CloudFlare_cert() {
         green_echo "Key: $CERT_DIR/$DOMAIN.key"
         green_echo "FullChain: $CERT_DIR/$DOMAIN.crt"
         green_echo "=============================="
+        setup_auto_renew "$DOMAIN" "$CF_Email" "$CF_Key"
     else
         red_echo "CloudFlare 证书申请失败，请检查 API Key 和域名"
     fi
     read -p "按回车返回上一级..."
+}
+
+# ==========================
+# 自动续签 Cron 设置
+# ==========================
+setup_auto_renew() {
+    local DOMAIN="$1"
+    local CF_Email="$2"
+    local CF_Key="$3"
+
+    green_echo "正在设置自动续签 (每天凌晨2点检查更新)..."
+
+    # Cron 脚本路径
+    local cron_script="/usr/local/bin/auto_renew_$DOMAIN.sh"
+
+    cat > "$cron_script" <<EOF
+#!/bin/bash
+export CF_Email="$CF_Email"
+export CF_Key="$CF_Key"
+export PATH="$ACME_HOME:\$PATH"
+"$ACME_HOME/acme.sh" --renew -d "$DOMAIN" --force
+"$ACME_HOME/acme.sh" --install-cert -d "$DOMAIN" \
+    --key-file       "$CERT_BASE_DIR/$DOMAIN/$DOMAIN.key" \
+    --fullchain-file "$CERT_BASE_DIR/$DOMAIN/$DOMAIN.crt" \
+    --reloadcmd "echo '证书已更新: $CERT_BASE_DIR/$DOMAIN'"
+EOF
+
+    chmod +x "$cron_script"
+
+    # 添加到 crontab（每天凌晨2点执行）
+    (crontab -l 2>/dev/null | grep -v "$cron_script" ; echo "0 2 * * * $cron_script >/dev/null 2>&1") | crontab -
+    green_echo "自动续签已设置成功！"
 }
 
 # ==========================
@@ -152,4 +185,63 @@ uninstall_cert() {
 # ==========================
 view_cert_paths() {
     clear
-    green_echo "=====================_
+    green_echo "=============================="
+    green_echo "        证书存储路径          "
+    green_echo "=============================="
+    green_echo "证书存储路径: $CERT_BASE_DIR"
+    
+    local certs=($(get_cert_list))
+    if [ ${#certs[@]} -eq 0 ]; then
+        red_echo "未找到任何证书"
+    else
+        for domain in "${certs[@]}"; do
+            cert_file="$CERT_BASE_DIR/$domain/$domain.crt"
+            green_echo "------------------------"
+            green_echo "域名: $domain"
+            green_echo "证书: $cert_file"
+            green_echo "私钥: $CERT_BASE_DIR/$domain/$domain.key"
+            if command -v openssl >/dev/null 2>&1 && [ -f "$cert_file" ]; then
+                expiry=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)
+                green_echo "过期时间: $expiry"
+            fi
+        done
+    fi
+    read -p "按回车返回主菜单..."
+}
+
+# ==========================
+# 主菜单
+# ==========================
+show_menu() {
+    while true; do
+        clear
+        green_echo "=============================="
+        green_echo "       证书安装管理菜单        "
+        green_echo "=============================="
+        green_echo "1) 安装证书 (CloudFlare DNS)"
+        green_echo "2) 更新/修改证书"
+        green_echo "3) 卸载证书"
+        green_echo "4) 查看证书路径"
+        green_echo "0) 退出脚本"
+        read -p "请选择操作 [0-4]: " choice
+        case $choice in
+            1) install_CloudFlare_cert ;;
+            2) update_cert ;;
+            3) uninstall_cert ;;
+            4) view_cert_paths ;;
+            0) green_echo "再见!"; exit 0 ;;
+            *) red_echo "无效选项，请重新选择！"; sleep 2 ;;
+        esac
+    done
+}
+
+# ==========================
+# 检查 root
+# ==========================
+if [ "$EUID" -ne 0 ]; then
+    red_echo "建议使用 root 用户运行脚本"
+    read -p "是否继续? (y/N): " ans
+    [[ "$ans" != [yY] ]] && exit 1
+fi
+
+show_menu
