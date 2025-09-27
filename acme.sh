@@ -83,7 +83,7 @@ select_cert_menu() {
     done
 }
 
-# 安装 GetSSL 证书
+# 安装 GetSSL 证书（修复版）
 install_getssl_cert() {
     clear
     green_echo "=============================="
@@ -113,12 +113,44 @@ install_getssl_cert() {
     local config_file="$getssl_dir/$DOMAIN/getssl.cfg"
     
     if [ -f "$config_file" ]; then
-        # 更新配置文件
+        # 更新配置文件 - 修复 ACL 和验证方式
         sed -i "s/^ACCOUNT_EMAIL=.*/ACCOUNT_EMAIL=\"$EMAIL\"/" "$config_file"
         sed -i "s|^CA=.*|CA=\"https://acme-v02.api.letsencrypt.org\"|" "$config_file"
-        sed -i "s|^PRIVATE_KEY_ALG=.*|PRIVATE_KEY_ALG=\"ec256\"|" "$config_file"
         
-        # 获取证书
+        # 使用 DNS 验证方式（更可靠）
+        echo "VALIDATE_VIA_DNS=\"true\"" >> "$config_file"
+        echo "DNS_ADD_COMMAND=\"/root/.getssl/dns_add.sh\"" >> "$config_file"
+        echo "DNS_DEL_COMMAND=\"/root/.getssl/dns_del.sh\"" >> "$config_file"
+        
+        # 创建 DNS 验证脚本（需要手动配置）
+        cat > "/root/.getssl/dns_add.sh" << 'EOF'
+#!/bin/bash
+# 这里需要您配置 DNS API
+# 示例使用 Cloudflare API
+echo "请手动在 DNS 中添加 TXT 记录:"
+echo "名称: _acme-challenge.$1"
+echo "值: $2"
+echo "按回车继续..."
+read
+EOF
+        
+        chmod +x "/root/.getssl/dns_add.sh"
+        
+        cat > "/root/.getssl/dns_del.sh" << 'EOF'
+#!/bin/bash
+echo "DNS 记录清理脚本"
+EOF
+        chmod +x "/root/.getssl/dns_del.sh"
+        
+        green_echo "GetSSL 配置完成，但需要手动 DNS 验证"
+        green_echo "请按以下步骤操作："
+        green_echo "1. 在 DNS 提供商处添加 TXT 记录"
+        green_echo "2. 名称: _acme-challenge.$DOMAIN"
+        green_echo "3. 值: (将在下一步显示)"
+        green_echo ""
+        read -p "按回车继续获取验证值..."
+        
+        # 尝试获取证书（会显示需要添加的 DNS 记录）
         if getssl "$DOMAIN"; then
             # 复制证书到指定目录
             cp "$getssl_dir/$DOMAIN/$DOMAIN.crt" "$CERT_DIR/$DOMAIN.crt"
@@ -131,7 +163,8 @@ install_getssl_cert() {
             green_echo "FullChain: $CERT_DIR/$DOMAIN.crt"
             green_echo "=============================="
         else
-            red_echo "GetSSL 证书申请失败"
+            red_echo "GetSSL 证书申请失败，请检查 DNS 配置"
+            green_echo "建议使用 CloudFlare 证书方式（选项2）"
         fi
     else
         red_echo "GetSSL 配置创建失败"
@@ -140,12 +173,15 @@ install_getssl_cert() {
     read -p "按回车返回上一级..."
 }
 
-# 安装 CloudFlare 证书
+# 安装 CloudFlare 证书（推荐方式）
 install_CloudFlare_cert() {
     clear
     green_echo "=============================="
     green_echo "    安装 CloudFlare 证书      "
     green_echo "=============================="
+    
+    green_echo "推荐使用此方式，自动完成 DNS 验证"
+    echo ""
     
     read -p "请输入 Cloudflare 邮箱: " CF_Email
     read -p "请输入 Cloudflare Global API Key: " CF_Key
@@ -160,6 +196,8 @@ install_CloudFlare_cert() {
     install_acme
 
     green_echo "正在申请 CloudFlare 证书..."
+    green_echo "这将自动完成 DNS 验证..."
+    
     if "$ACME_HOME/acme.sh" --issue --dns dns_cf -d "$DOMAIN" -d "*.$DOMAIN"; then
         "$ACME_HOME/acme.sh" --install-cert -d "$DOMAIN" \
             --key-file       "$CERT_DIR/$DOMAIN.key" \
@@ -173,7 +211,10 @@ install_CloudFlare_cert() {
         green_echo "FullChain: $CERT_DIR/$DOMAIN.crt"
         green_echo "=============================="
     else
-        red_echo "CloudFlare 证书申请失败，请检查 API 配置"
+        red_echo "CloudFlare 证书申请失败，请检查："
+        red_echo "1. API Key 是否正确"
+        red_echo "2. 域名是否在 Cloudflare 管理中"
+        red_echo "3. DNS 解析是否正常"
     fi
     
     read -p "按回车返回上一级..."
@@ -186,8 +227,8 @@ install_cert_menu() {
         green_echo "=============================="
         green_echo "        安装证书类型选择       "
         green_echo "=============================="
-        green_echo "1) 安装 GetSSL 证书"
-        green_echo "2) 安装 CloudFlare 证书"
+        green_echo "1) 安装 GetSSL 证书 (需要手动DNS验证)"
+        green_echo "2) 安装 CloudFlare 证书 (推荐，自动DNS验证)"
         green_echo "0) 返回主菜单"
         green_echo "=============================="
         read -p "请选择证书类型 [1-2] 或 [0返回]: " choice
