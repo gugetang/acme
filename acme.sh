@@ -27,10 +27,8 @@ install_acme() {
 
 # 安装 acme.sh 证书
 install_acme_cert() {
-    read -p "请输入 Acme 邮箱: " CF_Email
-    export CF_Email
-    read -p "请输入 Cloudflare Global API Key: " CF_Key
-    export CF_Key
+    read -p "请输入 Acme 邮箱: " acme_Email
+    export acme_Email
     read -p "请输入域名 (例如 optimized.kadi.eu.org): " DOMAIN
 
     CERT_DIR="$CERT_BASE_DIR/$DOMAIN"
@@ -56,9 +54,9 @@ install_acme_cert() {
 
 # 安装 CloudFlare 证书
 install_CloudFlare_cert() {
-    read -p "请输入 Cloudflare 邮箱: " CF_Email
+    read -p "请输入 Cloudflare 邮箱: " CloudFlare_Email
     export CF_Email
-    read -p "请输入 Cloudflare API Token: " CF_Token
+    read -p "请输入 Cloudflare API Token: " CloudFlare_Token
     export CF_Token
     read -p "请输入域名 (例如 optimized.kadi.eu.org): " DOMAIN
 
